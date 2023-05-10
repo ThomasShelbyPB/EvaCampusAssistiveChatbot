@@ -1,0 +1,176 @@
+<html>
+<head>
+<title>__init__.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #cc7832;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+__init__.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+
+<span class="s0">#   __</span>
+<span class="s0">#  /__)  _  _     _   _ _/   _</span>
+<span class="s0"># / (   (- (/ (/ (- _)  /  _)</span>
+<span class="s0">#          /</span>
+
+<span class="s2">&quot;&quot;&quot; 
+Requests HTTP Library 
+~~~~~~~~~~~~~~~~~~~~~ 
+ 
+Requests is an HTTP library, written in Python, for human beings. 
+Basic GET usage: 
+ 
+   &gt;&gt;&gt; import requests 
+   &gt;&gt;&gt; r = requests.get('https://www.python.org') 
+   &gt;&gt;&gt; r.status_code 
+   200 
+   &gt;&gt;&gt; b'Python is a programming language' in r.content 
+   True 
+ 
+... or POST: 
+ 
+   &gt;&gt;&gt; payload = dict(key1='value1', key2='value2') 
+   &gt;&gt;&gt; r = requests.post('https://httpbin.org/post', data=payload) 
+   &gt;&gt;&gt; print(r.text) 
+   { 
+     ... 
+     &quot;form&quot;: { 
+       &quot;key1&quot;: &quot;value1&quot;, 
+       &quot;key2&quot;: &quot;value2&quot; 
+     }, 
+     ... 
+   } 
+ 
+The other HTTP methods are supported - see `requests.api`. Full documentation 
+is at &lt;https://requests.readthedocs.io&gt;. 
+ 
+:copyright: (c) 2017 by Kenneth Reitz. 
+:license: Apache 2.0, see LICENSE for more details. 
+&quot;&quot;&quot;</span>
+
+<span class="s3">from </span><span class="s1">pip._vendor </span><span class="s3">import </span><span class="s1">urllib3</span>
+<span class="s3">import </span><span class="s1">warnings</span>
+<span class="s3">from </span><span class="s1">.exceptions </span><span class="s3">import </span><span class="s1">RequestsDependencyWarning</span>
+
+<span class="s1">charset_normalizer_version = </span><span class="s3">None</span>
+
+<span class="s3">try</span><span class="s1">:</span>
+    <span class="s3">from </span><span class="s1">pip._vendor.chardet </span><span class="s3">import </span><span class="s1">__version__ </span><span class="s3">as </span><span class="s1">chardet_version</span>
+<span class="s3">except </span><span class="s1">ImportError:</span>
+    <span class="s1">chardet_version = </span><span class="s3">None</span>
+
+<span class="s3">def </span><span class="s1">check_compatibility(urllib3_version</span><span class="s3">, </span><span class="s1">chardet_version</span><span class="s3">, </span><span class="s1">charset_normalizer_version):</span>
+    <span class="s1">urllib3_version = urllib3_version.split(</span><span class="s4">'.'</span><span class="s1">)</span>
+    <span class="s3">assert </span><span class="s1">urllib3_version != [</span><span class="s4">'dev'</span><span class="s1">]  </span><span class="s0"># Verify urllib3 isn't installed from git.</span>
+
+    <span class="s0"># Sometimes, urllib3 only reports its version as 16.1.</span>
+    <span class="s3">if </span><span class="s1">len(urllib3_version) == </span><span class="s5">2</span><span class="s1">:</span>
+        <span class="s1">urllib3_version.append(</span><span class="s4">'0'</span><span class="s1">)</span>
+
+    <span class="s0"># Check urllib3 for compatibility.</span>
+    <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch = urllib3_version  </span><span class="s0"># noqa: F811</span>
+    <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch = int(major)</span><span class="s3">, </span><span class="s1">int(minor)</span><span class="s3">, </span><span class="s1">int(patch)</span>
+    <span class="s0"># urllib3 &gt;= 1.21.1, &lt;= 1.26</span>
+    <span class="s3">assert </span><span class="s1">major == </span><span class="s5">1</span>
+    <span class="s3">assert </span><span class="s1">minor &gt;= </span><span class="s5">21</span>
+    <span class="s3">assert </span><span class="s1">minor &lt;= </span><span class="s5">26</span>
+
+    <span class="s0"># Check charset_normalizer for compatibility.</span>
+    <span class="s3">if </span><span class="s1">chardet_version:</span>
+        <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch = chardet_version.split(</span><span class="s4">'.'</span><span class="s1">)[:</span><span class="s5">3</span><span class="s1">]</span>
+        <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch = int(major)</span><span class="s3">, </span><span class="s1">int(minor)</span><span class="s3">, </span><span class="s1">int(patch)</span>
+        <span class="s0"># chardet_version &gt;= 3.0.2, &lt; 5.0.0</span>
+        <span class="s3">assert </span><span class="s1">(</span><span class="s5">3</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">2</span><span class="s1">) &lt;= (major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch) &lt; (</span><span class="s5">5</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s1">)</span>
+    <span class="s3">elif </span><span class="s1">charset_normalizer_version:</span>
+        <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch = charset_normalizer_version.split(</span><span class="s4">'.'</span><span class="s1">)[:</span><span class="s5">3</span><span class="s1">]</span>
+        <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch = int(major)</span><span class="s3">, </span><span class="s1">int(minor)</span><span class="s3">, </span><span class="s1">int(patch)</span>
+        <span class="s0"># charset_normalizer &gt;= 2.0.0 &lt; 3.0.0</span>
+        <span class="s3">assert </span><span class="s1">(</span><span class="s5">2</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s1">) &lt;= (major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">patch) &lt; (</span><span class="s5">3</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s1">)</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s3">raise </span><span class="s1">Exception(</span><span class="s4">&quot;You need either charset_normalizer or chardet installed&quot;</span><span class="s1">)</span>
+
+<span class="s3">def </span><span class="s1">_check_cryptography(cryptography_version):</span>
+    <span class="s0"># cryptography &lt; 1.3.4</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s1">cryptography_version = list(map(int</span><span class="s3">, </span><span class="s1">cryptography_version.split(</span><span class="s4">'.'</span><span class="s1">)))</span>
+    <span class="s3">except </span><span class="s1">ValueError:</span>
+        <span class="s3">return</span>
+
+    <span class="s3">if </span><span class="s1">cryptography_version &lt; [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s1">]:</span>
+        <span class="s1">warning = </span><span class="s4">'Old version of cryptography ({}) may cause slowdown.'</span><span class="s1">.format(cryptography_version)</span>
+        <span class="s1">warnings.warn(warning</span><span class="s3">, </span><span class="s1">RequestsDependencyWarning)</span>
+
+<span class="s0"># Check imported dependencies for compatibility.</span>
+<span class="s3">try</span><span class="s1">:</span>
+    <span class="s1">check_compatibility(urllib3.__version__</span><span class="s3">, </span><span class="s1">chardet_version</span><span class="s3">, </span><span class="s1">charset_normalizer_version)</span>
+<span class="s3">except </span><span class="s1">(AssertionError</span><span class="s3">, </span><span class="s1">ValueError):</span>
+    <span class="s1">warnings.warn(</span><span class="s4">&quot;urllib3 ({}) or chardet ({})/charset_normalizer ({}) doesn't match a supported &quot;</span>
+                  <span class="s4">&quot;version!&quot;</span><span class="s1">.format(urllib3.__version__</span><span class="s3">, </span><span class="s1">chardet_version</span><span class="s3">, </span><span class="s1">charset_normalizer_version)</span><span class="s3">,</span>
+                  <span class="s1">RequestsDependencyWarning)</span>
+
+<span class="s0"># Attempt to enable urllib3's fallback for SNI support</span>
+<span class="s0"># if the standard library doesn't support SNI or the</span>
+<span class="s0"># 'ssl' library isn't available.</span>
+<span class="s3">try</span><span class="s1">:</span>
+    <span class="s0"># Note: This logic prevents upgrading cryptography on Windows, if imported</span>
+    <span class="s0">#       as part of pip.</span>
+    <span class="s3">from </span><span class="s1">pip._internal.utils.compat </span><span class="s3">import </span><span class="s1">WINDOWS</span>
+    <span class="s3">if not </span><span class="s1">WINDOWS:</span>
+        <span class="s3">raise </span><span class="s1">ImportError(</span><span class="s4">&quot;pip internals: don't import cryptography on Windows&quot;</span><span class="s1">)</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s3">import </span><span class="s1">ssl</span>
+    <span class="s3">except </span><span class="s1">ImportError:</span>
+        <span class="s1">ssl = </span><span class="s3">None</span>
+
+    <span class="s3">if not </span><span class="s1">getattr(ssl</span><span class="s3">, </span><span class="s4">&quot;HAS_SNI&quot;</span><span class="s3">, False</span><span class="s1">):</span>
+        <span class="s3">from </span><span class="s1">pip._vendor.urllib3.contrib </span><span class="s3">import </span><span class="s1">pyopenssl</span>
+        <span class="s1">pyopenssl.inject_into_urllib3()</span>
+
+        <span class="s0"># Check cryptography version</span>
+        <span class="s3">from </span><span class="s1">cryptography </span><span class="s3">import </span><span class="s1">__version__ </span><span class="s3">as </span><span class="s1">cryptography_version</span>
+        <span class="s1">_check_cryptography(cryptography_version)</span>
+<span class="s3">except </span><span class="s1">ImportError:</span>
+    <span class="s3">pass</span>
+
+<span class="s0"># urllib3's DependencyWarnings should be silenced.</span>
+<span class="s3">from </span><span class="s1">pip._vendor.urllib3.exceptions </span><span class="s3">import </span><span class="s1">DependencyWarning</span>
+<span class="s1">warnings.simplefilter(</span><span class="s4">'ignore'</span><span class="s3">, </span><span class="s1">DependencyWarning)</span>
+
+<span class="s3">from </span><span class="s1">.__version__ </span><span class="s3">import </span><span class="s1">__title__</span><span class="s3">, </span><span class="s1">__description__</span><span class="s3">, </span><span class="s1">__url__</span><span class="s3">, </span><span class="s1">__version__</span>
+<span class="s3">from </span><span class="s1">.__version__ </span><span class="s3">import </span><span class="s1">__build__</span><span class="s3">, </span><span class="s1">__author__</span><span class="s3">, </span><span class="s1">__author_email__</span><span class="s3">, </span><span class="s1">__license__</span>
+<span class="s3">from </span><span class="s1">.__version__ </span><span class="s3">import </span><span class="s1">__copyright__</span><span class="s3">, </span><span class="s1">__cake__</span>
+
+<span class="s3">from </span><span class="s1">. </span><span class="s3">import </span><span class="s1">utils</span>
+<span class="s3">from </span><span class="s1">. </span><span class="s3">import </span><span class="s1">packages</span>
+<span class="s3">from </span><span class="s1">.models </span><span class="s3">import </span><span class="s1">Request</span><span class="s3">, </span><span class="s1">Response</span><span class="s3">, </span><span class="s1">PreparedRequest</span>
+<span class="s3">from </span><span class="s1">.api </span><span class="s3">import </span><span class="s1">request</span><span class="s3">, </span><span class="s1">get</span><span class="s3">, </span><span class="s1">head</span><span class="s3">, </span><span class="s1">post</span><span class="s3">, </span><span class="s1">patch</span><span class="s3">, </span><span class="s1">put</span><span class="s3">, </span><span class="s1">delete</span><span class="s3">, </span><span class="s1">options</span>
+<span class="s3">from </span><span class="s1">.sessions </span><span class="s3">import </span><span class="s1">session</span><span class="s3">, </span><span class="s1">Session</span>
+<span class="s3">from </span><span class="s1">.status_codes </span><span class="s3">import </span><span class="s1">codes</span>
+<span class="s3">from </span><span class="s1">.exceptions </span><span class="s3">import </span><span class="s1">(</span>
+    <span class="s1">RequestException</span><span class="s3">, </span><span class="s1">Timeout</span><span class="s3">, </span><span class="s1">URLRequired</span><span class="s3">,</span>
+    <span class="s1">TooManyRedirects</span><span class="s3">, </span><span class="s1">HTTPError</span><span class="s3">, </span><span class="s1">ConnectionError</span><span class="s3">,</span>
+    <span class="s1">FileModeWarning</span><span class="s3">, </span><span class="s1">ConnectTimeout</span><span class="s3">, </span><span class="s1">ReadTimeout</span>
+<span class="s1">)</span>
+
+<span class="s0"># Set default logging handler to avoid &quot;No handler found&quot; warnings.</span>
+<span class="s3">import </span><span class="s1">logging</span>
+<span class="s3">from </span><span class="s1">logging </span><span class="s3">import </span><span class="s1">NullHandler</span>
+
+<span class="s1">logging.getLogger(__name__).addHandler(NullHandler())</span>
+
+<span class="s0"># FileModeWarnings go off per the default.</span>
+<span class="s1">warnings.simplefilter(</span><span class="s4">'default'</span><span class="s3">, </span><span class="s1">FileModeWarning</span><span class="s3">, </span><span class="s1">append=</span><span class="s3">True</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

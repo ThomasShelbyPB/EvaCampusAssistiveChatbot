@@ -1,0 +1,1036 @@
+<html>
+<head>
+<title>utils.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #cc7832;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+utils.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+
+<span class="s2">&quot;&quot;&quot; 
+requests.utils 
+~~~~~~~~~~~~~~ 
+ 
+This module provides utility functions that are used within Requests 
+that are also useful for external consumption. 
+&quot;&quot;&quot;</span>
+
+<span class="s3">import </span><span class="s1">codecs</span>
+<span class="s3">import </span><span class="s1">contextlib</span>
+<span class="s3">import </span><span class="s1">io</span>
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">import </span><span class="s1">re</span>
+<span class="s3">import </span><span class="s1">socket</span>
+<span class="s3">import </span><span class="s1">struct</span>
+<span class="s3">import </span><span class="s1">sys</span>
+<span class="s3">import </span><span class="s1">tempfile</span>
+<span class="s3">import </span><span class="s1">warnings</span>
+<span class="s3">import </span><span class="s1">zipfile</span>
+<span class="s3">from </span><span class="s1">collections </span><span class="s3">import </span><span class="s1">OrderedDict</span>
+<span class="s3">from </span><span class="s1">pip._vendor.urllib3.util </span><span class="s3">import </span><span class="s1">make_headers</span>
+
+<span class="s3">from </span><span class="s1">.__version__ </span><span class="s3">import </span><span class="s1">__version__</span>
+<span class="s3">from </span><span class="s1">. </span><span class="s3">import </span><span class="s1">certs</span>
+<span class="s0"># to_native_string is unused here, but imported here for backwards compatibility</span>
+<span class="s3">from </span><span class="s1">._internal_utils </span><span class="s3">import </span><span class="s1">to_native_string</span>
+<span class="s3">from </span><span class="s1">.compat </span><span class="s3">import </span><span class="s1">parse_http_list </span><span class="s3">as </span><span class="s1">_parse_list_header</span>
+<span class="s3">from </span><span class="s1">.compat </span><span class="s3">import </span><span class="s1">(</span>
+    <span class="s1">quote</span><span class="s3">, </span><span class="s1">urlparse</span><span class="s3">, </span><span class="s1">bytes</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">unquote</span><span class="s3">, </span><span class="s1">getproxies</span><span class="s3">,</span>
+    <span class="s1">proxy_bypass</span><span class="s3">, </span><span class="s1">urlunparse</span><span class="s3">, </span><span class="s1">basestring</span><span class="s3">, </span><span class="s1">integer_types</span><span class="s3">, </span><span class="s1">is_py3</span><span class="s3">,</span>
+    <span class="s1">proxy_bypass_environment</span><span class="s3">, </span><span class="s1">getproxies_environment</span><span class="s3">, </span><span class="s1">Mapping)</span>
+<span class="s3">from </span><span class="s1">.cookies </span><span class="s3">import </span><span class="s1">cookiejar_from_dict</span>
+<span class="s3">from </span><span class="s1">.structures </span><span class="s3">import </span><span class="s1">CaseInsensitiveDict</span>
+<span class="s3">from </span><span class="s1">.exceptions </span><span class="s3">import </span><span class="s1">(</span>
+    <span class="s1">InvalidURL</span><span class="s3">, </span><span class="s1">InvalidHeader</span><span class="s3">, </span><span class="s1">FileModeWarning</span><span class="s3">, </span><span class="s1">UnrewindableBodyError)</span>
+
+<span class="s1">NETRC_FILES = (</span><span class="s4">'.netrc'</span><span class="s3">, </span><span class="s4">'_netrc'</span><span class="s1">)</span>
+
+<span class="s1">DEFAULT_CA_BUNDLE_PATH = certs.where()</span>
+
+<span class="s1">DEFAULT_PORTS = {</span><span class="s4">'http'</span><span class="s1">: </span><span class="s5">80</span><span class="s3">, </span><span class="s4">'https'</span><span class="s1">: </span><span class="s5">443</span><span class="s1">}</span>
+
+<span class="s0"># Ensure that ', ' is used to preserve previous delimiter behavior.</span>
+<span class="s1">DEFAULT_ACCEPT_ENCODING = </span><span class="s4">&quot;, &quot;</span><span class="s1">.join(</span>
+    <span class="s1">re.split(</span><span class="s4">r&quot;,\s*&quot;</span><span class="s3">, </span><span class="s1">make_headers(accept_encoding=</span><span class="s3">True</span><span class="s1">)[</span><span class="s4">&quot;accept-encoding&quot;</span><span class="s1">])</span>
+<span class="s1">)</span>
+
+
+<span class="s3">if </span><span class="s1">sys.platform == </span><span class="s4">'win32'</span><span class="s1">:</span>
+    <span class="s0"># provide a proxy_bypass version on Windows without DNS lookups</span>
+
+    <span class="s3">def </span><span class="s1">proxy_bypass_registry(host):</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s3">if </span><span class="s1">is_py3:</span>
+                <span class="s3">import </span><span class="s1">winreg</span>
+            <span class="s3">else</span><span class="s1">:</span>
+                <span class="s3">import </span><span class="s1">_winreg </span><span class="s3">as </span><span class="s1">winreg</span>
+        <span class="s3">except </span><span class="s1">ImportError:</span>
+            <span class="s3">return False</span>
+
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">internetSettings = winreg.OpenKey(winreg.HKEY_CURRENT_USER</span><span class="s3">,</span>
+                <span class="s4">r'Software\Microsoft\Windows\CurrentVersion\Internet Settings'</span><span class="s1">)</span>
+            <span class="s0"># ProxyEnable could be REG_SZ or REG_DWORD, normalizing it</span>
+            <span class="s1">proxyEnable = int(winreg.QueryValueEx(internetSettings</span><span class="s3">,</span>
+                                              <span class="s4">'ProxyEnable'</span><span class="s1">)[</span><span class="s5">0</span><span class="s1">])</span>
+            <span class="s0"># ProxyOverride is almost always a string</span>
+            <span class="s1">proxyOverride = winreg.QueryValueEx(internetSettings</span><span class="s3">,</span>
+                                                <span class="s4">'ProxyOverride'</span><span class="s1">)[</span><span class="s5">0</span><span class="s1">]</span>
+        <span class="s3">except </span><span class="s1">OSError:</span>
+            <span class="s3">return False</span>
+        <span class="s3">if not </span><span class="s1">proxyEnable </span><span class="s3">or not </span><span class="s1">proxyOverride:</span>
+            <span class="s3">return False</span>
+
+        <span class="s0"># make a check value list from the registry entry: replace the</span>
+        <span class="s0"># '&lt;local&gt;' string by the localhost entry and the corresponding</span>
+        <span class="s0"># canonical entry.</span>
+        <span class="s1">proxyOverride = proxyOverride.split(</span><span class="s4">';'</span><span class="s1">)</span>
+        <span class="s0"># now check if we match one of the registry values.</span>
+        <span class="s3">for </span><span class="s1">test </span><span class="s3">in </span><span class="s1">proxyOverride:</span>
+            <span class="s3">if </span><span class="s1">test == </span><span class="s4">'&lt;local&gt;'</span><span class="s1">:</span>
+                <span class="s3">if </span><span class="s4">'.' </span><span class="s3">not in </span><span class="s1">host:</span>
+                    <span class="s3">return True</span>
+            <span class="s1">test = test.replace(</span><span class="s4">&quot;.&quot;</span><span class="s3">, </span><span class="s4">r&quot;\.&quot;</span><span class="s1">)     </span><span class="s0"># mask dots</span>
+            <span class="s1">test = test.replace(</span><span class="s4">&quot;*&quot;</span><span class="s3">, </span><span class="s4">r&quot;.*&quot;</span><span class="s1">)     </span><span class="s0"># change glob sequence</span>
+            <span class="s1">test = test.replace(</span><span class="s4">&quot;?&quot;</span><span class="s3">, </span><span class="s4">r&quot;.&quot;</span><span class="s1">)      </span><span class="s0"># change glob char</span>
+            <span class="s3">if </span><span class="s1">re.match(test</span><span class="s3">, </span><span class="s1">host</span><span class="s3">, </span><span class="s1">re.I):</span>
+                <span class="s3">return True</span>
+        <span class="s3">return False</span>
+
+    <span class="s3">def </span><span class="s1">proxy_bypass(host):  </span><span class="s0"># noqa</span>
+        <span class="s2">&quot;&quot;&quot;Return True, if the host should be bypassed. 
+ 
+        Checks proxy settings gathered from the environment, if specified, 
+        or the registry. 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">getproxies_environment():</span>
+            <span class="s3">return </span><span class="s1">proxy_bypass_environment(host)</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s3">return </span><span class="s1">proxy_bypass_registry(host)</span>
+
+
+<span class="s3">def </span><span class="s1">dict_to_sequence(d):</span>
+    <span class="s2">&quot;&quot;&quot;Returns an internal sequence dictionary update.&quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">hasattr(d</span><span class="s3">, </span><span class="s4">'items'</span><span class="s1">):</span>
+        <span class="s1">d = d.items()</span>
+
+    <span class="s3">return </span><span class="s1">d</span>
+
+
+<span class="s3">def </span><span class="s1">super_len(o):</span>
+    <span class="s1">total_length = </span><span class="s3">None</span>
+    <span class="s1">current_position = </span><span class="s5">0</span>
+
+    <span class="s3">if </span><span class="s1">hasattr(o</span><span class="s3">, </span><span class="s4">'__len__'</span><span class="s1">):</span>
+        <span class="s1">total_length = len(o)</span>
+
+    <span class="s3">elif </span><span class="s1">hasattr(o</span><span class="s3">, </span><span class="s4">'len'</span><span class="s1">):</span>
+        <span class="s1">total_length = o.len</span>
+
+    <span class="s3">elif </span><span class="s1">hasattr(o</span><span class="s3">, </span><span class="s4">'fileno'</span><span class="s1">):</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">fileno = o.fileno()</span>
+        <span class="s3">except </span><span class="s1">io.UnsupportedOperation:</span>
+            <span class="s3">pass</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s1">total_length = os.fstat(fileno).st_size</span>
+
+            <span class="s0"># Having used fstat to determine the file length, we need to</span>
+            <span class="s0"># confirm that this file was opened up in binary mode.</span>
+            <span class="s3">if </span><span class="s4">'b' </span><span class="s3">not in </span><span class="s1">o.mode:</span>
+                <span class="s1">warnings.warn((</span>
+                    <span class="s4">&quot;Requests has determined the content-length for this &quot;</span>
+                    <span class="s4">&quot;request using the binary size of the file: however, the &quot;</span>
+                    <span class="s4">&quot;file has been opened in text mode (i.e. without the 'b' &quot;</span>
+                    <span class="s4">&quot;flag in the mode). This may lead to an incorrect &quot;</span>
+                    <span class="s4">&quot;content-length. In Requests 3.0, support will be removed &quot;</span>
+                    <span class="s4">&quot;for files in text mode.&quot;</span><span class="s1">)</span><span class="s3">,</span>
+                    <span class="s1">FileModeWarning</span>
+                <span class="s1">)</span>
+
+    <span class="s3">if </span><span class="s1">hasattr(o</span><span class="s3">, </span><span class="s4">'tell'</span><span class="s1">):</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">current_position = o.tell()</span>
+        <span class="s3">except </span><span class="s1">(OSError</span><span class="s3">, </span><span class="s1">IOError):</span>
+            <span class="s0"># This can happen in some weird situations, such as when the file</span>
+            <span class="s0"># is actually a special file descriptor like stdin. In this</span>
+            <span class="s0"># instance, we don't know what the length is, so set it to zero and</span>
+            <span class="s0"># let requests chunk it instead.</span>
+            <span class="s3">if </span><span class="s1">total_length </span><span class="s3">is not None</span><span class="s1">:</span>
+                <span class="s1">current_position = total_length</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s3">if </span><span class="s1">hasattr(o</span><span class="s3">, </span><span class="s4">'seek'</span><span class="s1">) </span><span class="s3">and </span><span class="s1">total_length </span><span class="s3">is None</span><span class="s1">:</span>
+                <span class="s0"># StringIO and BytesIO have seek but no useable fileno</span>
+                <span class="s3">try</span><span class="s1">:</span>
+                    <span class="s0"># seek to end of file</span>
+                    <span class="s1">o.seek(</span><span class="s5">0</span><span class="s3">, </span><span class="s5">2</span><span class="s1">)</span>
+                    <span class="s1">total_length = o.tell()</span>
+
+                    <span class="s0"># seek back to current position to support</span>
+                    <span class="s0"># partially read file-like objects</span>
+                    <span class="s1">o.seek(current_position </span><span class="s3">or </span><span class="s5">0</span><span class="s1">)</span>
+                <span class="s3">except </span><span class="s1">(OSError</span><span class="s3">, </span><span class="s1">IOError):</span>
+                    <span class="s1">total_length = </span><span class="s5">0</span>
+
+    <span class="s3">if </span><span class="s1">total_length </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s1">total_length = </span><span class="s5">0</span>
+
+    <span class="s3">return </span><span class="s1">max(</span><span class="s5">0</span><span class="s3">, </span><span class="s1">total_length - current_position)</span>
+
+
+<span class="s3">def </span><span class="s1">get_netrc_auth(url</span><span class="s3">, </span><span class="s1">raise_errors=</span><span class="s3">False</span><span class="s1">):</span>
+    <span class="s2">&quot;&quot;&quot;Returns the Requests tuple auth for a given url from netrc.&quot;&quot;&quot;</span>
+
+    <span class="s1">netrc_file = os.environ.get(</span><span class="s4">'NETRC'</span><span class="s1">)</span>
+    <span class="s3">if </span><span class="s1">netrc_file </span><span class="s3">is not None</span><span class="s1">:</span>
+        <span class="s1">netrc_locations = (netrc_file</span><span class="s3">,</span><span class="s1">)</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s1">netrc_locations = (</span><span class="s4">'~/{}'</span><span class="s1">.format(f) </span><span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">NETRC_FILES)</span>
+
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s3">from </span><span class="s1">netrc </span><span class="s3">import </span><span class="s1">netrc</span><span class="s3">, </span><span class="s1">NetrcParseError</span>
+
+        <span class="s1">netrc_path = </span><span class="s3">None</span>
+
+        <span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">netrc_locations:</span>
+            <span class="s3">try</span><span class="s1">:</span>
+                <span class="s1">loc = os.path.expanduser(f)</span>
+            <span class="s3">except </span><span class="s1">KeyError:</span>
+                <span class="s0"># os.path.expanduser can fail when $HOME is undefined and</span>
+                <span class="s0"># getpwuid fails. See https://bugs.python.org/issue20164 &amp;</span>
+                <span class="s0"># https://github.com/psf/requests/issues/1846</span>
+                <span class="s3">return</span>
+
+            <span class="s3">if </span><span class="s1">os.path.exists(loc):</span>
+                <span class="s1">netrc_path = loc</span>
+                <span class="s3">break</span>
+
+        <span class="s0"># Abort early if there isn't one.</span>
+        <span class="s3">if </span><span class="s1">netrc_path </span><span class="s3">is None</span><span class="s1">:</span>
+            <span class="s3">return</span>
+
+        <span class="s1">ri = urlparse(url)</span>
+
+        <span class="s0"># Strip port numbers from netloc. This weird `if...encode`` dance is</span>
+        <span class="s0"># used for Python 3.2, which doesn't support unicode literals.</span>
+        <span class="s1">splitstr = </span><span class="s6">b':'</span>
+        <span class="s3">if </span><span class="s1">isinstance(url</span><span class="s3">, </span><span class="s1">str):</span>
+            <span class="s1">splitstr = splitstr.decode(</span><span class="s4">'ascii'</span><span class="s1">)</span>
+        <span class="s1">host = ri.netloc.split(splitstr)[</span><span class="s5">0</span><span class="s1">]</span>
+
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">_netrc = netrc(netrc_path).authenticators(host)</span>
+            <span class="s3">if </span><span class="s1">_netrc:</span>
+                <span class="s0"># Return with login / password</span>
+                <span class="s1">login_i = (</span><span class="s5">0 </span><span class="s3">if </span><span class="s1">_netrc[</span><span class="s5">0</span><span class="s1">] </span><span class="s3">else </span><span class="s5">1</span><span class="s1">)</span>
+                <span class="s3">return </span><span class="s1">(_netrc[login_i]</span><span class="s3">, </span><span class="s1">_netrc[</span><span class="s5">2</span><span class="s1">])</span>
+        <span class="s3">except </span><span class="s1">(NetrcParseError</span><span class="s3">, </span><span class="s1">IOError):</span>
+            <span class="s0"># If there was a parsing error or a permissions issue reading the file,</span>
+            <span class="s0"># we'll just skip netrc auth unless explicitly asked to raise errors.</span>
+            <span class="s3">if </span><span class="s1">raise_errors:</span>
+                <span class="s3">raise</span>
+
+    <span class="s0"># App Engine hackiness.</span>
+    <span class="s3">except </span><span class="s1">(ImportError</span><span class="s3">, </span><span class="s1">AttributeError):</span>
+        <span class="s3">pass</span>
+
+
+<span class="s3">def </span><span class="s1">guess_filename(obj):</span>
+    <span class="s2">&quot;&quot;&quot;Tries to guess the filename of the given object.&quot;&quot;&quot;</span>
+    <span class="s1">name = getattr(obj</span><span class="s3">, </span><span class="s4">'name'</span><span class="s3">, None</span><span class="s1">)</span>
+    <span class="s3">if </span><span class="s1">(name </span><span class="s3">and </span><span class="s1">isinstance(name</span><span class="s3">, </span><span class="s1">basestring) </span><span class="s3">and </span><span class="s1">name[</span><span class="s5">0</span><span class="s1">] != </span><span class="s4">'&lt;' </span><span class="s3">and</span>
+            <span class="s1">name[-</span><span class="s5">1</span><span class="s1">] != </span><span class="s4">'&gt;'</span><span class="s1">):</span>
+        <span class="s3">return </span><span class="s1">os.path.basename(name)</span>
+
+
+<span class="s3">def </span><span class="s1">extract_zipped_paths(path):</span>
+    <span class="s2">&quot;&quot;&quot;Replace nonexistent paths that look like they refer to a member of a zip 
+    archive with the location of an extracted copy of the target, or else 
+    just return the provided path unchanged. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">os.path.exists(path):</span>
+        <span class="s0"># this is already a valid path, no need to do anything further</span>
+        <span class="s3">return </span><span class="s1">path</span>
+
+    <span class="s0"># find the first valid part of the provided path and treat that as a zip archive</span>
+    <span class="s0"># assume the rest of the path is the name of a member in the archive</span>
+    <span class="s1">archive</span><span class="s3">, </span><span class="s1">member = os.path.split(path)</span>
+    <span class="s3">while </span><span class="s1">archive </span><span class="s3">and not </span><span class="s1">os.path.exists(archive):</span>
+        <span class="s1">archive</span><span class="s3">, </span><span class="s1">prefix = os.path.split(archive)</span>
+        <span class="s1">member = </span><span class="s4">'/'</span><span class="s1">.join([prefix</span><span class="s3">, </span><span class="s1">member])</span>
+
+    <span class="s3">if not </span><span class="s1">zipfile.is_zipfile(archive):</span>
+        <span class="s3">return </span><span class="s1">path</span>
+
+    <span class="s1">zip_file = zipfile.ZipFile(archive)</span>
+    <span class="s3">if </span><span class="s1">member </span><span class="s3">not in </span><span class="s1">zip_file.namelist():</span>
+        <span class="s3">return </span><span class="s1">path</span>
+
+    <span class="s0"># we have a valid zip archive and a valid member of that archive</span>
+    <span class="s1">tmp = tempfile.gettempdir()</span>
+    <span class="s1">extracted_path = os.path.join(tmp</span><span class="s3">, </span><span class="s1">member.split(</span><span class="s4">'/'</span><span class="s1">)[-</span><span class="s5">1</span><span class="s1">])</span>
+    <span class="s3">if not </span><span class="s1">os.path.exists(extracted_path):</span>
+        <span class="s0"># use read + write to avoid the creating nested folders, we only want the file, avoids mkdir racing condition</span>
+        <span class="s3">with </span><span class="s1">atomic_open(extracted_path) </span><span class="s3">as </span><span class="s1">file_handler:</span>
+            <span class="s1">file_handler.write(zip_file.read(member))</span>
+    <span class="s3">return </span><span class="s1">extracted_path</span>
+
+
+<span class="s1">@contextlib.contextmanager</span>
+<span class="s3">def </span><span class="s1">atomic_open(filename):</span>
+    <span class="s2">&quot;&quot;&quot;Write a file to the disk in an atomic fashion&quot;&quot;&quot;</span>
+    <span class="s1">replacer = os.rename </span><span class="s3">if </span><span class="s1">sys.version_info[</span><span class="s5">0</span><span class="s1">] == </span><span class="s5">2 </span><span class="s3">else </span><span class="s1">os.replace</span>
+    <span class="s1">tmp_descriptor</span><span class="s3">, </span><span class="s1">tmp_name = tempfile.mkstemp(dir=os.path.dirname(filename))</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s3">with </span><span class="s1">os.fdopen(tmp_descriptor</span><span class="s3">, </span><span class="s4">'wb'</span><span class="s1">) </span><span class="s3">as </span><span class="s1">tmp_handler:</span>
+            <span class="s3">yield </span><span class="s1">tmp_handler</span>
+        <span class="s1">replacer(tmp_name</span><span class="s3">, </span><span class="s1">filename)</span>
+    <span class="s3">except </span><span class="s1">BaseException:</span>
+        <span class="s1">os.remove(tmp_name)</span>
+        <span class="s3">raise</span>
+
+
+<span class="s3">def </span><span class="s1">from_key_val_list(value):</span>
+    <span class="s2">&quot;&quot;&quot;Take an object and test to see if it can be represented as a 
+    dictionary. Unless it can not be represented as such, return an 
+    OrderedDict, e.g., 
+ 
+    :: 
+ 
+        &gt;&gt;&gt; from_key_val_list([('key', 'val')]) 
+        OrderedDict([('key', 'val')]) 
+        &gt;&gt;&gt; from_key_val_list('string') 
+        Traceback (most recent call last): 
+        ... 
+        ValueError: cannot encode objects that are not 2-tuples 
+        &gt;&gt;&gt; from_key_val_list({'key': 'val'}) 
+        OrderedDict([('key', 'val')]) 
+ 
+    :rtype: OrderedDict 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">value </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s3">return None</span>
+
+    <span class="s3">if </span><span class="s1">isinstance(value</span><span class="s3">, </span><span class="s1">(str</span><span class="s3">, </span><span class="s1">bytes</span><span class="s3">, </span><span class="s1">bool</span><span class="s3">, </span><span class="s1">int)):</span>
+        <span class="s3">raise </span><span class="s1">ValueError(</span><span class="s4">'cannot encode objects that are not 2-tuples'</span><span class="s1">)</span>
+
+    <span class="s3">return </span><span class="s1">OrderedDict(value)</span>
+
+
+<span class="s3">def </span><span class="s1">to_key_val_list(value):</span>
+    <span class="s2">&quot;&quot;&quot;Take an object and test to see if it can be represented as a 
+    dictionary. If it can be, return a list of tuples, e.g., 
+ 
+    :: 
+ 
+        &gt;&gt;&gt; to_key_val_list([('key', 'val')]) 
+        [('key', 'val')] 
+        &gt;&gt;&gt; to_key_val_list({'key': 'val'}) 
+        [('key', 'val')] 
+        &gt;&gt;&gt; to_key_val_list('string') 
+        Traceback (most recent call last): 
+        ... 
+        ValueError: cannot encode objects that are not 2-tuples 
+ 
+    :rtype: list 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">value </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s3">return None</span>
+
+    <span class="s3">if </span><span class="s1">isinstance(value</span><span class="s3">, </span><span class="s1">(str</span><span class="s3">, </span><span class="s1">bytes</span><span class="s3">, </span><span class="s1">bool</span><span class="s3">, </span><span class="s1">int)):</span>
+        <span class="s3">raise </span><span class="s1">ValueError(</span><span class="s4">'cannot encode objects that are not 2-tuples'</span><span class="s1">)</span>
+
+    <span class="s3">if </span><span class="s1">isinstance(value</span><span class="s3">, </span><span class="s1">Mapping):</span>
+        <span class="s1">value = value.items()</span>
+
+    <span class="s3">return </span><span class="s1">list(value)</span>
+
+
+<span class="s0"># From mitsuhiko/werkzeug (used with permission).</span>
+<span class="s3">def </span><span class="s1">parse_list_header(value):</span>
+    <span class="s2">&quot;&quot;&quot;Parse lists as described by RFC 2068 Section 2. 
+ 
+    In particular, parse comma-separated lists where the elements of 
+    the list may include quoted-strings.  A quoted-string could 
+    contain a comma.  A non-quoted string could have quotes in the 
+    middle.  Quotes are removed automatically after parsing. 
+ 
+    It basically works like :func:`parse_set_header` just that items 
+    may appear multiple times and case sensitivity is preserved. 
+ 
+    The return value is a standard :class:`list`: 
+ 
+    &gt;&gt;&gt; parse_list_header('token, &quot;quoted value&quot;') 
+    ['token', 'quoted value'] 
+ 
+    To create a header from the :class:`list` again, use the 
+    :func:`dump_header` function. 
+ 
+    :param value: a string with a list header. 
+    :return: :class:`list` 
+    :rtype: list 
+    &quot;&quot;&quot;</span>
+    <span class="s1">result = []</span>
+    <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">_parse_list_header(value):</span>
+        <span class="s3">if </span><span class="s1">item[:</span><span class="s5">1</span><span class="s1">] == item[-</span><span class="s5">1</span><span class="s1">:] == </span><span class="s4">'&quot;'</span><span class="s1">:</span>
+            <span class="s1">item = unquote_header_value(item[</span><span class="s5">1</span><span class="s1">:-</span><span class="s5">1</span><span class="s1">])</span>
+        <span class="s1">result.append(item)</span>
+    <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s0"># From mitsuhiko/werkzeug (used with permission).</span>
+<span class="s3">def </span><span class="s1">parse_dict_header(value):</span>
+    <span class="s2">&quot;&quot;&quot;Parse lists of key, value pairs as described by RFC 2068 Section 2 and 
+    convert them into a python dict: 
+ 
+    &gt;&gt;&gt; d = parse_dict_header('foo=&quot;is a fish&quot;, bar=&quot;as well&quot;') 
+    &gt;&gt;&gt; type(d) is dict 
+    True 
+    &gt;&gt;&gt; sorted(d.items()) 
+    [('bar', 'as well'), ('foo', 'is a fish')] 
+ 
+    If there is no value for a key it will be `None`: 
+ 
+    &gt;&gt;&gt; parse_dict_header('key_without_value') 
+    {'key_without_value': None} 
+ 
+    To create a header from the :class:`dict` again, use the 
+    :func:`dump_header` function. 
+ 
+    :param value: a string with a dict header. 
+    :return: :class:`dict` 
+    :rtype: dict 
+    &quot;&quot;&quot;</span>
+    <span class="s1">result = {}</span>
+    <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">_parse_list_header(value):</span>
+        <span class="s3">if </span><span class="s4">'=' </span><span class="s3">not in </span><span class="s1">item:</span>
+            <span class="s1">result[item] = </span><span class="s3">None</span>
+            <span class="s3">continue</span>
+        <span class="s1">name</span><span class="s3">, </span><span class="s1">value = item.split(</span><span class="s4">'='</span><span class="s3">, </span><span class="s5">1</span><span class="s1">)</span>
+        <span class="s3">if </span><span class="s1">value[:</span><span class="s5">1</span><span class="s1">] == value[-</span><span class="s5">1</span><span class="s1">:] == </span><span class="s4">'&quot;'</span><span class="s1">:</span>
+            <span class="s1">value = unquote_header_value(value[</span><span class="s5">1</span><span class="s1">:-</span><span class="s5">1</span><span class="s1">])</span>
+        <span class="s1">result[name] = value</span>
+    <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s0"># From mitsuhiko/werkzeug (used with permission).</span>
+<span class="s3">def </span><span class="s1">unquote_header_value(value</span><span class="s3">, </span><span class="s1">is_filename=</span><span class="s3">False</span><span class="s1">):</span>
+    <span class="s2">r&quot;&quot;&quot;Unquotes a header value.  (Reversal of :func:`quote_header_value`). 
+    This does not use the real unquoting but what browsers are actually 
+    using for quoting. 
+ 
+    :param value: the header value to unquote. 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">value </span><span class="s3">and </span><span class="s1">value[</span><span class="s5">0</span><span class="s1">] == value[-</span><span class="s5">1</span><span class="s1">] == </span><span class="s4">'&quot;'</span><span class="s1">:</span>
+        <span class="s0"># this is not the real unquoting, but fixing this so that the</span>
+        <span class="s0"># RFC is met will result in bugs with internet explorer and</span>
+        <span class="s0"># probably some other browsers as well.  IE for example is</span>
+        <span class="s0"># uploading files with &quot;C:\foo\bar.txt&quot; as filename</span>
+        <span class="s1">value = value[</span><span class="s5">1</span><span class="s1">:-</span><span class="s5">1</span><span class="s1">]</span>
+
+        <span class="s0"># if this is a filename and the starting characters look like</span>
+        <span class="s0"># a UNC path, then just return the value without quotes.  Using the</span>
+        <span class="s0"># replace sequence below on a UNC path has the effect of turning</span>
+        <span class="s0"># the leading double slash into a single slash and then</span>
+        <span class="s0"># _fix_ie_filename() doesn't work correctly.  See #458.</span>
+        <span class="s3">if not </span><span class="s1">is_filename </span><span class="s3">or </span><span class="s1">value[:</span><span class="s5">2</span><span class="s1">] != </span><span class="s4">'</span><span class="s3">\\\\</span><span class="s4">'</span><span class="s1">:</span>
+            <span class="s3">return </span><span class="s1">value.replace(</span><span class="s4">'</span><span class="s3">\\\\</span><span class="s4">'</span><span class="s3">, </span><span class="s4">'</span><span class="s3">\\</span><span class="s4">'</span><span class="s1">).replace(</span><span class="s4">'</span><span class="s3">\\</span><span class="s4">&quot;'</span><span class="s3">, </span><span class="s4">'&quot;'</span><span class="s1">)</span>
+    <span class="s3">return </span><span class="s1">value</span>
+
+
+<span class="s3">def </span><span class="s1">dict_from_cookiejar(cj):</span>
+    <span class="s2">&quot;&quot;&quot;Returns a key/value dictionary from a CookieJar. 
+ 
+    :param cj: CookieJar object to extract cookies from. 
+    :rtype: dict 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">cookie_dict = {}</span>
+
+    <span class="s3">for </span><span class="s1">cookie </span><span class="s3">in </span><span class="s1">cj:</span>
+        <span class="s1">cookie_dict[cookie.name] = cookie.value</span>
+
+    <span class="s3">return </span><span class="s1">cookie_dict</span>
+
+
+<span class="s3">def </span><span class="s1">add_dict_to_cookiejar(cj</span><span class="s3">, </span><span class="s1">cookie_dict):</span>
+    <span class="s2">&quot;&quot;&quot;Returns a CookieJar from a key/value dictionary. 
+ 
+    :param cj: CookieJar to insert cookies into. 
+    :param cookie_dict: Dict of key/values to insert into CookieJar. 
+    :rtype: CookieJar 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">return </span><span class="s1">cookiejar_from_dict(cookie_dict</span><span class="s3">, </span><span class="s1">cj)</span>
+
+
+<span class="s3">def </span><span class="s1">get_encodings_from_content(content):</span>
+    <span class="s2">&quot;&quot;&quot;Returns encodings from given content string. 
+ 
+    :param content: bytestring to extract encodings from. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">warnings.warn((</span>
+        <span class="s4">'In requests 3.0, get_encodings_from_content will be removed. For '</span>
+        <span class="s4">'more information, please see the discussion on issue #2266. (This'</span>
+        <span class="s4">' warning should only appear once.)'</span><span class="s1">)</span><span class="s3">,</span>
+        <span class="s1">DeprecationWarning)</span>
+
+    <span class="s1">charset_re = re.compile(</span><span class="s4">r'&lt;meta.*?charset=[&quot;\']*(.+?)[&quot;\'&gt;]'</span><span class="s3">, </span><span class="s1">flags=re.I)</span>
+    <span class="s1">pragma_re = re.compile(</span><span class="s4">r'&lt;meta.*?content=[&quot;\']*;?charset=(.+?)[&quot;\'&gt;]'</span><span class="s3">, </span><span class="s1">flags=re.I)</span>
+    <span class="s1">xml_re = re.compile(</span><span class="s4">r'^&lt;\?xml.*?encoding=[&quot;\']*(.+?)[&quot;\'&gt;]'</span><span class="s1">)</span>
+
+    <span class="s3">return </span><span class="s1">(charset_re.findall(content) +</span>
+            <span class="s1">pragma_re.findall(content) +</span>
+            <span class="s1">xml_re.findall(content))</span>
+
+
+<span class="s3">def </span><span class="s1">_parse_content_type_header(header):</span>
+    <span class="s2">&quot;&quot;&quot;Returns content type and parameters from given header 
+ 
+    :param header: string 
+    :return: tuple containing content type and dictionary of 
+         parameters 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">tokens = header.split(</span><span class="s4">';'</span><span class="s1">)</span>
+    <span class="s1">content_type</span><span class="s3">, </span><span class="s1">params = tokens[</span><span class="s5">0</span><span class="s1">].strip()</span><span class="s3">, </span><span class="s1">tokens[</span><span class="s5">1</span><span class="s1">:]</span>
+    <span class="s1">params_dict = {}</span>
+    <span class="s1">items_to_strip = </span><span class="s4">&quot;</span><span class="s3">\&quot;</span><span class="s4">' &quot;</span>
+
+    <span class="s3">for </span><span class="s1">param </span><span class="s3">in </span><span class="s1">params:</span>
+        <span class="s1">param = param.strip()</span>
+        <span class="s3">if </span><span class="s1">param:</span>
+            <span class="s1">key</span><span class="s3">, </span><span class="s1">value = param</span><span class="s3">, True</span>
+            <span class="s1">index_of_equals = param.find(</span><span class="s4">&quot;=&quot;</span><span class="s1">)</span>
+            <span class="s3">if </span><span class="s1">index_of_equals != -</span><span class="s5">1</span><span class="s1">:</span>
+                <span class="s1">key = param[:index_of_equals].strip(items_to_strip)</span>
+                <span class="s1">value = param[index_of_equals + </span><span class="s5">1</span><span class="s1">:].strip(items_to_strip)</span>
+            <span class="s1">params_dict[key.lower()] = value</span>
+    <span class="s3">return </span><span class="s1">content_type</span><span class="s3">, </span><span class="s1">params_dict</span>
+
+
+<span class="s3">def </span><span class="s1">get_encoding_from_headers(headers):</span>
+    <span class="s2">&quot;&quot;&quot;Returns encodings from given HTTP Header Dict. 
+ 
+    :param headers: dictionary to extract encoding from. 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">content_type = headers.get(</span><span class="s4">'content-type'</span><span class="s1">)</span>
+
+    <span class="s3">if not </span><span class="s1">content_type:</span>
+        <span class="s3">return None</span>
+
+    <span class="s1">content_type</span><span class="s3">, </span><span class="s1">params = _parse_content_type_header(content_type)</span>
+
+    <span class="s3">if </span><span class="s4">'charset' </span><span class="s3">in </span><span class="s1">params:</span>
+        <span class="s3">return </span><span class="s1">params[</span><span class="s4">'charset'</span><span class="s1">].strip(</span><span class="s4">&quot;'</span><span class="s3">\&quot;</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+    <span class="s3">if </span><span class="s4">'text' </span><span class="s3">in </span><span class="s1">content_type:</span>
+        <span class="s3">return </span><span class="s4">'ISO-8859-1'</span>
+
+    <span class="s3">if </span><span class="s4">'application/json' </span><span class="s3">in </span><span class="s1">content_type:</span>
+        <span class="s0"># Assume UTF-8 based on RFC 4627: https://www.ietf.org/rfc/rfc4627.txt since the charset was unset</span>
+        <span class="s3">return </span><span class="s4">'utf-8'</span>
+
+
+<span class="s3">def </span><span class="s1">stream_decode_response_unicode(iterator</span><span class="s3">, </span><span class="s1">r):</span>
+    <span class="s2">&quot;&quot;&quot;Stream decodes a iterator.&quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">r.encoding </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">iterator:</span>
+            <span class="s3">yield </span><span class="s1">item</span>
+        <span class="s3">return</span>
+
+    <span class="s1">decoder = codecs.getincrementaldecoder(r.encoding)(errors=</span><span class="s4">'replace'</span><span class="s1">)</span>
+    <span class="s3">for </span><span class="s1">chunk </span><span class="s3">in </span><span class="s1">iterator:</span>
+        <span class="s1">rv = decoder.decode(chunk)</span>
+        <span class="s3">if </span><span class="s1">rv:</span>
+            <span class="s3">yield </span><span class="s1">rv</span>
+    <span class="s1">rv = decoder.decode(</span><span class="s6">b''</span><span class="s3">, </span><span class="s1">final=</span><span class="s3">True</span><span class="s1">)</span>
+    <span class="s3">if </span><span class="s1">rv:</span>
+        <span class="s3">yield </span><span class="s1">rv</span>
+
+
+<span class="s3">def </span><span class="s1">iter_slices(string</span><span class="s3">, </span><span class="s1">slice_length):</span>
+    <span class="s2">&quot;&quot;&quot;Iterate over slices of a string.&quot;&quot;&quot;</span>
+    <span class="s1">pos = </span><span class="s5">0</span>
+    <span class="s3">if </span><span class="s1">slice_length </span><span class="s3">is None or </span><span class="s1">slice_length &lt;= </span><span class="s5">0</span><span class="s1">:</span>
+        <span class="s1">slice_length = len(string)</span>
+    <span class="s3">while </span><span class="s1">pos &lt; len(string):</span>
+        <span class="s3">yield </span><span class="s1">string[pos:pos + slice_length]</span>
+        <span class="s1">pos += slice_length</span>
+
+
+<span class="s3">def </span><span class="s1">get_unicode_from_response(r):</span>
+    <span class="s2">&quot;&quot;&quot;Returns the requested content back in unicode. 
+ 
+    :param r: Response object to get unicode content from. 
+ 
+    Tried: 
+ 
+    1. charset from content-type 
+    2. fall back and replace all unicode characters 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s1">warnings.warn((</span>
+        <span class="s4">'In requests 3.0, get_unicode_from_response will be removed. For '</span>
+        <span class="s4">'more information, please see the discussion on issue #2266. (This'</span>
+        <span class="s4">' warning should only appear once.)'</span><span class="s1">)</span><span class="s3">,</span>
+        <span class="s1">DeprecationWarning)</span>
+
+    <span class="s1">tried_encodings = []</span>
+
+    <span class="s0"># Try charset from content-type</span>
+    <span class="s1">encoding = get_encoding_from_headers(r.headers)</span>
+
+    <span class="s3">if </span><span class="s1">encoding:</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s3">return </span><span class="s1">str(r.content</span><span class="s3">, </span><span class="s1">encoding)</span>
+        <span class="s3">except </span><span class="s1">UnicodeError:</span>
+            <span class="s1">tried_encodings.append(encoding)</span>
+
+    <span class="s0"># Fall back:</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s3">return </span><span class="s1">str(r.content</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">errors=</span><span class="s4">'replace'</span><span class="s1">)</span>
+    <span class="s3">except </span><span class="s1">TypeError:</span>
+        <span class="s3">return </span><span class="s1">r.content</span>
+
+
+<span class="s0"># The unreserved URI characters (RFC 3986)</span>
+<span class="s1">UNRESERVED_SET = frozenset(</span>
+    <span class="s4">&quot;ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&quot; </span><span class="s1">+ </span><span class="s4">&quot;0123456789-._~&quot;</span><span class="s1">)</span>
+
+
+<span class="s3">def </span><span class="s1">unquote_unreserved(uri):</span>
+    <span class="s2">&quot;&quot;&quot;Un-escape any percent-escape sequences in a URI that are unreserved 
+    characters. This leaves all reserved, illegal and non-ASCII bytes encoded. 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s1">parts = uri.split(</span><span class="s4">'%'</span><span class="s1">)</span>
+    <span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">range(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">len(parts)):</span>
+        <span class="s1">h = parts[i][</span><span class="s5">0</span><span class="s1">:</span><span class="s5">2</span><span class="s1">]</span>
+        <span class="s3">if </span><span class="s1">len(h) == </span><span class="s5">2 </span><span class="s3">and </span><span class="s1">h.isalnum():</span>
+            <span class="s3">try</span><span class="s1">:</span>
+                <span class="s1">c = chr(int(h</span><span class="s3">, </span><span class="s5">16</span><span class="s1">))</span>
+            <span class="s3">except </span><span class="s1">ValueError:</span>
+                <span class="s3">raise </span><span class="s1">InvalidURL(</span><span class="s4">&quot;Invalid percent-escape sequence: '%s'&quot; </span><span class="s1">% h)</span>
+
+            <span class="s3">if </span><span class="s1">c </span><span class="s3">in </span><span class="s1">UNRESERVED_SET:</span>
+                <span class="s1">parts[i] = c + parts[i][</span><span class="s5">2</span><span class="s1">:]</span>
+            <span class="s3">else</span><span class="s1">:</span>
+                <span class="s1">parts[i] = </span><span class="s4">'%' </span><span class="s1">+ parts[i]</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s1">parts[i] = </span><span class="s4">'%' </span><span class="s1">+ parts[i]</span>
+    <span class="s3">return </span><span class="s4">''</span><span class="s1">.join(parts)</span>
+
+
+<span class="s3">def </span><span class="s1">requote_uri(uri):</span>
+    <span class="s2">&quot;&quot;&quot;Re-quote the given URI. 
+ 
+    This function passes the given URI through an unquote/quote cycle to 
+    ensure that it is fully and consistently quoted. 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s1">safe_with_percent = </span><span class="s4">&quot;!#$%&amp;'()*+,/:;=?@[]~&quot;</span>
+    <span class="s1">safe_without_percent = </span><span class="s4">&quot;!#$&amp;'()*+,/:;=?@[]~&quot;</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s0"># Unquote only the unreserved characters</span>
+        <span class="s0"># Then quote only illegal characters (do not quote reserved,</span>
+        <span class="s0"># unreserved, or '%')</span>
+        <span class="s3">return </span><span class="s1">quote(unquote_unreserved(uri)</span><span class="s3">, </span><span class="s1">safe=safe_with_percent)</span>
+    <span class="s3">except </span><span class="s1">InvalidURL:</span>
+        <span class="s0"># We couldn't unquote the given URI, so let's try quoting it, but</span>
+        <span class="s0"># there may be unquoted '%'s in the URI. We need to make sure they're</span>
+        <span class="s0"># properly quoted so they do not cause issues elsewhere.</span>
+        <span class="s3">return </span><span class="s1">quote(uri</span><span class="s3">, </span><span class="s1">safe=safe_without_percent)</span>
+
+
+<span class="s3">def </span><span class="s1">address_in_network(ip</span><span class="s3">, </span><span class="s1">net):</span>
+    <span class="s2">&quot;&quot;&quot;This function allows you to check if an IP belongs to a network subnet 
+ 
+    Example: returns True if ip = 192.168.1.1 and net = 192.168.1.0/24 
+             returns False if ip = 192.168.1.1 and net = 192.168.100.0/24 
+ 
+    :rtype: bool 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipaddr = struct.unpack(</span><span class="s4">'=L'</span><span class="s3">, </span><span class="s1">socket.inet_aton(ip))[</span><span class="s5">0</span><span class="s1">]</span>
+    <span class="s1">netaddr</span><span class="s3">, </span><span class="s1">bits = net.split(</span><span class="s4">'/'</span><span class="s1">)</span>
+    <span class="s1">netmask = struct.unpack(</span><span class="s4">'=L'</span><span class="s3">, </span><span class="s1">socket.inet_aton(dotted_netmask(int(bits))))[</span><span class="s5">0</span><span class="s1">]</span>
+    <span class="s1">network = struct.unpack(</span><span class="s4">'=L'</span><span class="s3">, </span><span class="s1">socket.inet_aton(netaddr))[</span><span class="s5">0</span><span class="s1">] &amp; netmask</span>
+    <span class="s3">return </span><span class="s1">(ipaddr &amp; netmask) == (network &amp; netmask)</span>
+
+
+<span class="s3">def </span><span class="s1">dotted_netmask(mask):</span>
+    <span class="s2">&quot;&quot;&quot;Converts mask from /xx format to xxx.xxx.xxx.xxx 
+ 
+    Example: if mask is 24 function returns 255.255.255.0 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s1">bits = </span><span class="s5">0xffffffff </span><span class="s1">^ (</span><span class="s5">1 </span><span class="s1">&lt;&lt; </span><span class="s5">32 </span><span class="s1">- mask) - </span><span class="s5">1</span>
+    <span class="s3">return </span><span class="s1">socket.inet_ntoa(struct.pack(</span><span class="s4">'&gt;I'</span><span class="s3">, </span><span class="s1">bits))</span>
+
+
+<span class="s3">def </span><span class="s1">is_ipv4_address(string_ip):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :rtype: bool 
+    &quot;&quot;&quot;</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s1">socket.inet_aton(string_ip)</span>
+    <span class="s3">except </span><span class="s1">socket.error:</span>
+        <span class="s3">return False</span>
+    <span class="s3">return True</span>
+
+
+<span class="s3">def </span><span class="s1">is_valid_cidr(string_network):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Very simple check of the cidr format in no_proxy variable. 
+ 
+    :rtype: bool 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">string_network.count(</span><span class="s4">'/'</span><span class="s1">) == </span><span class="s5">1</span><span class="s1">:</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">mask = int(string_network.split(</span><span class="s4">'/'</span><span class="s1">)[</span><span class="s5">1</span><span class="s1">])</span>
+        <span class="s3">except </span><span class="s1">ValueError:</span>
+            <span class="s3">return False</span>
+
+        <span class="s3">if </span><span class="s1">mask &lt; </span><span class="s5">1 </span><span class="s3">or </span><span class="s1">mask &gt; </span><span class="s5">32</span><span class="s1">:</span>
+            <span class="s3">return False</span>
+
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">socket.inet_aton(string_network.split(</span><span class="s4">'/'</span><span class="s1">)[</span><span class="s5">0</span><span class="s1">])</span>
+        <span class="s3">except </span><span class="s1">socket.error:</span>
+            <span class="s3">return False</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s3">return False</span>
+    <span class="s3">return True</span>
+
+
+<span class="s1">@contextlib.contextmanager</span>
+<span class="s3">def </span><span class="s1">set_environ(env_name</span><span class="s3">, </span><span class="s1">value):</span>
+    <span class="s2">&quot;&quot;&quot;Set the environment variable 'env_name' to 'value' 
+ 
+    Save previous value, yield, and then restore the previous value stored in 
+    the environment variable 'env_name'. 
+ 
+    If 'value' is None, do nothing&quot;&quot;&quot;</span>
+    <span class="s1">value_changed = value </span><span class="s3">is not None</span>
+    <span class="s3">if </span><span class="s1">value_changed:</span>
+        <span class="s1">old_value = os.environ.get(env_name)</span>
+        <span class="s1">os.environ[env_name] = value</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s3">yield</span>
+    <span class="s3">finally</span><span class="s1">:</span>
+        <span class="s3">if </span><span class="s1">value_changed:</span>
+            <span class="s3">if </span><span class="s1">old_value </span><span class="s3">is None</span><span class="s1">:</span>
+                <span class="s3">del </span><span class="s1">os.environ[env_name]</span>
+            <span class="s3">else</span><span class="s1">:</span>
+                <span class="s1">os.environ[env_name] = old_value</span>
+
+
+<span class="s3">def </span><span class="s1">should_bypass_proxies(url</span><span class="s3">, </span><span class="s1">no_proxy):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Returns whether we should bypass proxies or not. 
+ 
+    :rtype: bool 
+    &quot;&quot;&quot;</span>
+    <span class="s0"># Prioritize lowercase environment variables over uppercase</span>
+    <span class="s0"># to keep a consistent behaviour with other http projects (curl, wget).</span>
+    <span class="s1">get_proxy = </span><span class="s3">lambda </span><span class="s1">k: os.environ.get(k) </span><span class="s3">or </span><span class="s1">os.environ.get(k.upper())</span>
+
+    <span class="s0"># First check whether no_proxy is defined. If it is, check that the URL</span>
+    <span class="s0"># we're getting isn't in the no_proxy list.</span>
+    <span class="s1">no_proxy_arg = no_proxy</span>
+    <span class="s3">if </span><span class="s1">no_proxy </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s1">no_proxy = get_proxy(</span><span class="s4">'no_proxy'</span><span class="s1">)</span>
+    <span class="s1">parsed = urlparse(url)</span>
+
+    <span class="s3">if </span><span class="s1">parsed.hostname </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s0"># URLs don't always have hostnames, e.g. file:/// urls.</span>
+        <span class="s3">return True</span>
+
+    <span class="s3">if </span><span class="s1">no_proxy:</span>
+        <span class="s0"># We need to check whether we match here. We need to see if we match</span>
+        <span class="s0"># the end of the hostname, both with and without the port.</span>
+        <span class="s1">no_proxy = (</span>
+            <span class="s1">host </span><span class="s3">for </span><span class="s1">host </span><span class="s3">in </span><span class="s1">no_proxy.replace(</span><span class="s4">' '</span><span class="s3">, </span><span class="s4">''</span><span class="s1">).split(</span><span class="s4">','</span><span class="s1">) </span><span class="s3">if </span><span class="s1">host</span>
+        <span class="s1">)</span>
+
+        <span class="s3">if </span><span class="s1">is_ipv4_address(parsed.hostname):</span>
+            <span class="s3">for </span><span class="s1">proxy_ip </span><span class="s3">in </span><span class="s1">no_proxy:</span>
+                <span class="s3">if </span><span class="s1">is_valid_cidr(proxy_ip):</span>
+                    <span class="s3">if </span><span class="s1">address_in_network(parsed.hostname</span><span class="s3">, </span><span class="s1">proxy_ip):</span>
+                        <span class="s3">return True</span>
+                <span class="s3">elif </span><span class="s1">parsed.hostname == proxy_ip:</span>
+                    <span class="s0"># If no_proxy ip was defined in plain IP notation instead of cidr notation &amp;</span>
+                    <span class="s0"># matches the IP of the index</span>
+                    <span class="s3">return True</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s1">host_with_port = parsed.hostname</span>
+            <span class="s3">if </span><span class="s1">parsed.port:</span>
+                <span class="s1">host_with_port += </span><span class="s4">':{}'</span><span class="s1">.format(parsed.port)</span>
+
+            <span class="s3">for </span><span class="s1">host </span><span class="s3">in </span><span class="s1">no_proxy:</span>
+                <span class="s3">if </span><span class="s1">parsed.hostname.endswith(host) </span><span class="s3">or </span><span class="s1">host_with_port.endswith(host):</span>
+                    <span class="s0"># The URL does match something in no_proxy, so we don't want</span>
+                    <span class="s0"># to apply the proxies on this URL.</span>
+                    <span class="s3">return True</span>
+
+    <span class="s3">with </span><span class="s1">set_environ(</span><span class="s4">'no_proxy'</span><span class="s3">, </span><span class="s1">no_proxy_arg):</span>
+        <span class="s0"># parsed.hostname can be `None` in cases such as a file URI.</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">bypass = proxy_bypass(parsed.hostname)</span>
+        <span class="s3">except </span><span class="s1">(TypeError</span><span class="s3">, </span><span class="s1">socket.gaierror):</span>
+            <span class="s1">bypass = </span><span class="s3">False</span>
+
+    <span class="s3">if </span><span class="s1">bypass:</span>
+        <span class="s3">return True</span>
+
+    <span class="s3">return False</span>
+
+
+<span class="s3">def </span><span class="s1">get_environ_proxies(url</span><span class="s3">, </span><span class="s1">no_proxy=</span><span class="s3">None</span><span class="s1">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Return a dict of environment proxies. 
+ 
+    :rtype: dict 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">should_bypass_proxies(url</span><span class="s3">, </span><span class="s1">no_proxy=no_proxy):</span>
+        <span class="s3">return </span><span class="s1">{}</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s3">return </span><span class="s1">getproxies()</span>
+
+
+<span class="s3">def </span><span class="s1">select_proxy(url</span><span class="s3">, </span><span class="s1">proxies):</span>
+    <span class="s2">&quot;&quot;&quot;Select a proxy for the url, if applicable. 
+ 
+    :param url: The url being for the request 
+    :param proxies: A dictionary of schemes or schemes and hosts to proxy URLs 
+    &quot;&quot;&quot;</span>
+    <span class="s1">proxies = proxies </span><span class="s3">or </span><span class="s1">{}</span>
+    <span class="s1">urlparts = urlparse(url)</span>
+    <span class="s3">if </span><span class="s1">urlparts.hostname </span><span class="s3">is None</span><span class="s1">:</span>
+        <span class="s3">return </span><span class="s1">proxies.get(urlparts.scheme</span><span class="s3">, </span><span class="s1">proxies.get(</span><span class="s4">'all'</span><span class="s1">))</span>
+
+    <span class="s1">proxy_keys = [</span>
+        <span class="s1">urlparts.scheme + </span><span class="s4">'://' </span><span class="s1">+ urlparts.hostname</span><span class="s3">,</span>
+        <span class="s1">urlparts.scheme</span><span class="s3">,</span>
+        <span class="s4">'all://' </span><span class="s1">+ urlparts.hostname</span><span class="s3">,</span>
+        <span class="s4">'all'</span><span class="s3">,</span>
+    <span class="s1">]</span>
+    <span class="s1">proxy = </span><span class="s3">None</span>
+    <span class="s3">for </span><span class="s1">proxy_key </span><span class="s3">in </span><span class="s1">proxy_keys:</span>
+        <span class="s3">if </span><span class="s1">proxy_key </span><span class="s3">in </span><span class="s1">proxies:</span>
+            <span class="s1">proxy = proxies[proxy_key]</span>
+            <span class="s3">break</span>
+
+    <span class="s3">return </span><span class="s1">proxy</span>
+
+
+<span class="s3">def </span><span class="s1">default_user_agent(name=</span><span class="s4">&quot;python-requests&quot;</span><span class="s1">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Return a string representing the default user agent. 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s4">'%s/%s' </span><span class="s1">% (name</span><span class="s3">, </span><span class="s1">__version__)</span>
+
+
+<span class="s3">def </span><span class="s1">default_headers():</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :rtype: requests.structures.CaseInsensitiveDict 
+    &quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s1">CaseInsensitiveDict({</span>
+        <span class="s4">'User-Agent'</span><span class="s1">: default_user_agent()</span><span class="s3">,</span>
+        <span class="s4">'Accept-Encoding'</span><span class="s1">: DEFAULT_ACCEPT_ENCODING</span><span class="s3">,</span>
+        <span class="s4">'Accept'</span><span class="s1">: </span><span class="s4">'*/*'</span><span class="s3">,</span>
+        <span class="s4">'Connection'</span><span class="s1">: </span><span class="s4">'keep-alive'</span><span class="s3">,</span>
+    <span class="s1">})</span>
+
+
+<span class="s3">def </span><span class="s1">parse_header_links(value):</span>
+    <span class="s2">&quot;&quot;&quot;Return a list of parsed link headers proxies. 
+ 
+    i.e. Link: &lt;http:/.../front.jpeg&gt;; rel=front; type=&quot;image/jpeg&quot;,&lt;http://.../back.jpeg&gt;; rel=back;type=&quot;image/jpeg&quot; 
+ 
+    :rtype: list 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">links = []</span>
+
+    <span class="s1">replace_chars = </span><span class="s4">' </span><span class="s3">\'</span><span class="s4">&quot;'</span>
+
+    <span class="s1">value = value.strip(replace_chars)</span>
+    <span class="s3">if not </span><span class="s1">value:</span>
+        <span class="s3">return </span><span class="s1">links</span>
+
+    <span class="s3">for </span><span class="s1">val </span><span class="s3">in </span><span class="s1">re.split(</span><span class="s4">', *&lt;'</span><span class="s3">, </span><span class="s1">value):</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">url</span><span class="s3">, </span><span class="s1">params = val.split(</span><span class="s4">';'</span><span class="s3">, </span><span class="s5">1</span><span class="s1">)</span>
+        <span class="s3">except </span><span class="s1">ValueError:</span>
+            <span class="s1">url</span><span class="s3">, </span><span class="s1">params = val</span><span class="s3">, </span><span class="s4">''</span>
+
+        <span class="s1">link = {</span><span class="s4">'url'</span><span class="s1">: url.strip(</span><span class="s4">'&lt;&gt; </span><span class="s3">\'</span><span class="s4">&quot;'</span><span class="s1">)}</span>
+
+        <span class="s3">for </span><span class="s1">param </span><span class="s3">in </span><span class="s1">params.split(</span><span class="s4">';'</span><span class="s1">):</span>
+            <span class="s3">try</span><span class="s1">:</span>
+                <span class="s1">key</span><span class="s3">, </span><span class="s1">value = param.split(</span><span class="s4">'='</span><span class="s1">)</span>
+            <span class="s3">except </span><span class="s1">ValueError:</span>
+                <span class="s3">break</span>
+
+            <span class="s1">link[key.strip(replace_chars)] = value.strip(replace_chars)</span>
+
+        <span class="s1">links.append(link)</span>
+
+    <span class="s3">return </span><span class="s1">links</span>
+
+
+<span class="s0"># Null bytes; no need to recreate these on each call to guess_json_utf</span>
+<span class="s1">_null = </span><span class="s4">'</span><span class="s3">\x00</span><span class="s4">'</span><span class="s1">.encode(</span><span class="s4">'ascii'</span><span class="s1">)  </span><span class="s0"># encoding to ASCII for Python 3</span>
+<span class="s1">_null2 = _null * </span><span class="s5">2</span>
+<span class="s1">_null3 = _null * </span><span class="s5">3</span>
+
+
+<span class="s3">def </span><span class="s1">guess_json_utf(data):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s0"># JSON always starts with two ASCII characters, so detection is as</span>
+    <span class="s0"># easy as counting the nulls and from their location and count</span>
+    <span class="s0"># determine the encoding. Also detect a BOM, if present.</span>
+    <span class="s1">sample = data[:</span><span class="s5">4</span><span class="s1">]</span>
+    <span class="s3">if </span><span class="s1">sample </span><span class="s3">in </span><span class="s1">(codecs.BOM_UTF32_LE</span><span class="s3">, </span><span class="s1">codecs.BOM_UTF32_BE):</span>
+        <span class="s3">return </span><span class="s4">'utf-32'     </span><span class="s0"># BOM included</span>
+    <span class="s3">if </span><span class="s1">sample[:</span><span class="s5">3</span><span class="s1">] == codecs.BOM_UTF8:</span>
+        <span class="s3">return </span><span class="s4">'utf-8-sig'  </span><span class="s0"># BOM included, MS style (discouraged)</span>
+    <span class="s3">if </span><span class="s1">sample[:</span><span class="s5">2</span><span class="s1">] </span><span class="s3">in </span><span class="s1">(codecs.BOM_UTF16_LE</span><span class="s3">, </span><span class="s1">codecs.BOM_UTF16_BE):</span>
+        <span class="s3">return </span><span class="s4">'utf-16'     </span><span class="s0"># BOM included</span>
+    <span class="s1">nullcount = sample.count(_null)</span>
+    <span class="s3">if </span><span class="s1">nullcount == </span><span class="s5">0</span><span class="s1">:</span>
+        <span class="s3">return </span><span class="s4">'utf-8'</span>
+    <span class="s3">if </span><span class="s1">nullcount == </span><span class="s5">2</span><span class="s1">:</span>
+        <span class="s3">if </span><span class="s1">sample[::</span><span class="s5">2</span><span class="s1">] == _null2:   </span><span class="s0"># 1st and 3rd are null</span>
+            <span class="s3">return </span><span class="s4">'utf-16-be'</span>
+        <span class="s3">if </span><span class="s1">sample[</span><span class="s5">1</span><span class="s1">::</span><span class="s5">2</span><span class="s1">] == _null2:  </span><span class="s0"># 2nd and 4th are null</span>
+            <span class="s3">return </span><span class="s4">'utf-16-le'</span>
+        <span class="s0"># Did not detect 2 valid UTF-16 ascii-range characters</span>
+    <span class="s3">if </span><span class="s1">nullcount == </span><span class="s5">3</span><span class="s1">:</span>
+        <span class="s3">if </span><span class="s1">sample[:</span><span class="s5">3</span><span class="s1">] == _null3:</span>
+            <span class="s3">return </span><span class="s4">'utf-32-be'</span>
+        <span class="s3">if </span><span class="s1">sample[</span><span class="s5">1</span><span class="s1">:] == _null3:</span>
+            <span class="s3">return </span><span class="s4">'utf-32-le'</span>
+        <span class="s0"># Did not detect a valid UTF-32 ascii-range character</span>
+    <span class="s3">return None</span>
+
+
+<span class="s3">def </span><span class="s1">prepend_scheme_if_needed(url</span><span class="s3">, </span><span class="s1">new_scheme):</span>
+    <span class="s2">&quot;&quot;&quot;Given a URL that may or may not have a scheme, prepend the given scheme. 
+    Does not replace a present scheme with the one provided as an argument. 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s1">scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, </span><span class="s1">query</span><span class="s3">, </span><span class="s1">fragment = urlparse(url</span><span class="s3">, </span><span class="s1">new_scheme)</span>
+
+    <span class="s0"># urlparse is a finicky beast, and sometimes decides that there isn't a</span>
+    <span class="s0"># netloc present. Assume that it's being over-cautious, and switch netloc</span>
+    <span class="s0"># and path if urlparse decided there was no netloc.</span>
+    <span class="s3">if not </span><span class="s1">netloc:</span>
+        <span class="s1">netloc</span><span class="s3">, </span><span class="s1">path = path</span><span class="s3">, </span><span class="s1">netloc</span>
+
+    <span class="s3">return </span><span class="s1">urlunparse((scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, </span><span class="s1">query</span><span class="s3">, </span><span class="s1">fragment))</span>
+
+
+<span class="s3">def </span><span class="s1">get_auth_from_url(url):</span>
+    <span class="s2">&quot;&quot;&quot;Given a url with authentication components, extract them into a tuple of 
+    username,password. 
+ 
+    :rtype: (str,str) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">parsed = urlparse(url)</span>
+
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s1">auth = (unquote(parsed.username)</span><span class="s3">, </span><span class="s1">unquote(parsed.password))</span>
+    <span class="s3">except </span><span class="s1">(AttributeError</span><span class="s3">, </span><span class="s1">TypeError):</span>
+        <span class="s1">auth = (</span><span class="s4">''</span><span class="s3">, </span><span class="s4">''</span><span class="s1">)</span>
+
+    <span class="s3">return </span><span class="s1">auth</span>
+
+
+<span class="s0"># Moved outside of function to avoid recompile every call</span>
+<span class="s1">_CLEAN_HEADER_REGEX_BYTE = re.compile(</span><span class="s6">b'^</span><span class="s3">\\</span><span class="s6">S[^</span><span class="s3">\\</span><span class="s6">r</span><span class="s3">\\</span><span class="s6">n]*$|^$'</span><span class="s1">)</span>
+<span class="s1">_CLEAN_HEADER_REGEX_STR = re.compile(</span><span class="s4">r'^\S[^\r\n]*$|^$'</span><span class="s1">)</span>
+
+
+<span class="s3">def </span><span class="s1">check_header_validity(header):</span>
+    <span class="s2">&quot;&quot;&quot;Verifies that header value is a string which doesn't contain 
+    leading whitespace or return characters. This prevents unintended 
+    header injection. 
+ 
+    :param header: tuple, in the format (name, value). 
+    &quot;&quot;&quot;</span>
+    <span class="s1">name</span><span class="s3">, </span><span class="s1">value = header</span>
+
+    <span class="s3">if </span><span class="s1">isinstance(value</span><span class="s3">, </span><span class="s1">bytes):</span>
+        <span class="s1">pat = _CLEAN_HEADER_REGEX_BYTE</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s1">pat = _CLEAN_HEADER_REGEX_STR</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s3">if not </span><span class="s1">pat.match(value):</span>
+            <span class="s3">raise </span><span class="s1">InvalidHeader(</span><span class="s4">&quot;Invalid return character or leading space in header: %s&quot; </span><span class="s1">% name)</span>
+    <span class="s3">except </span><span class="s1">TypeError:</span>
+        <span class="s3">raise </span><span class="s1">InvalidHeader(</span><span class="s4">&quot;Value for header {%s: %s} must be of type str or &quot;</span>
+                            <span class="s4">&quot;bytes, not %s&quot; </span><span class="s1">% (name</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">type(value)))</span>
+
+
+<span class="s3">def </span><span class="s1">urldefragauth(url):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Given a url remove the fragment and the authentication part. 
+ 
+    :rtype: str 
+    &quot;&quot;&quot;</span>
+    <span class="s1">scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, </span><span class="s1">query</span><span class="s3">, </span><span class="s1">fragment = urlparse(url)</span>
+
+    <span class="s0"># see func:`prepend_scheme_if_needed`</span>
+    <span class="s3">if not </span><span class="s1">netloc:</span>
+        <span class="s1">netloc</span><span class="s3">, </span><span class="s1">path = path</span><span class="s3">, </span><span class="s1">netloc</span>
+
+    <span class="s1">netloc = netloc.rsplit(</span><span class="s4">'@'</span><span class="s3">, </span><span class="s5">1</span><span class="s1">)[-</span><span class="s5">1</span><span class="s1">]</span>
+
+    <span class="s3">return </span><span class="s1">urlunparse((scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, </span><span class="s1">query</span><span class="s3">, </span><span class="s4">''</span><span class="s1">))</span>
+
+
+<span class="s3">def </span><span class="s1">rewind_body(prepared_request):</span>
+    <span class="s2">&quot;&quot;&quot;Move file pointer back to its recorded starting position 
+    so it can be read again on redirect. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">body_seek = getattr(prepared_request.body</span><span class="s3">, </span><span class="s4">'seek'</span><span class="s3">, None</span><span class="s1">)</span>
+    <span class="s3">if </span><span class="s1">body_seek </span><span class="s3">is not None and </span><span class="s1">isinstance(prepared_request._body_position</span><span class="s3">, </span><span class="s1">integer_types):</span>
+        <span class="s3">try</span><span class="s1">:</span>
+            <span class="s1">body_seek(prepared_request._body_position)</span>
+        <span class="s3">except </span><span class="s1">(IOError</span><span class="s3">, </span><span class="s1">OSError):</span>
+            <span class="s3">raise </span><span class="s1">UnrewindableBodyError(</span><span class="s4">&quot;An error occurred when rewinding request &quot;</span>
+                                        <span class="s4">&quot;body for redirect.&quot;</span><span class="s1">)</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s3">raise </span><span class="s1">UnrewindableBodyError(</span><span class="s4">&quot;Unable to rewind request body for redirect.&quot;</span><span class="s1">)</span>
+</pre>
+</body>
+</html>
